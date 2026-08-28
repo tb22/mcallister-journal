@@ -915,7 +915,10 @@
       
       currentSpeechUtterance.onend = () => {
         if (isTourPlaying) {
-          navigateTour(1);
+          // Pause 3 seconds after speech ends, then move to next entry
+          tourTimer = setTimeout(() => {
+            navigateTour(1);
+          }, 3000);
         }
       };
       
