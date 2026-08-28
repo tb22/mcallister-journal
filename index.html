@@ -894,14 +894,37 @@
     // Tour Mode Logic - Document & Speech-Based
     // -----
     function extractJournalQuote(docContent) {
-      // Extract text between "Captain McAllister's Journal:" section markers
-      const quoteMatch = docContent.match(/Captain McAllister's Journal[:\s]*([^]*?)(?=##|$)/i);
-      if (quoteMatch && quoteMatch[1]) {
-        return quoteMatch[1].replace(/[#*`\[\]()]/g, '').trim().substring(0, 500);
+      // Find the position of "Captain McAllister's Journal:"
+      const journalMarkerIdx = docContent.toLowerCase().indexOf("captain mcallister's journal:");
+      if (journalMarkerIdx === -1) {
+        // If no journal marker, extract first non-heading paragraph
+        const lines = docContent.split('\n');
+        for (let line of lines) {
+          const cleaned = line.replace(/^#+\s*/, '').trim();
+          if (cleaned && !cleaned.startsWith('#')) {
+            return cleaned.replace(/[#*`\[\]()]/g, '').trim();
+          }
+        }
+        return 'Journal entry';
       }
-      // Fallback: extract first paragraph
-      const paraMatch = docContent.match(/^[^\n]+/m);
-      return paraMatch ? paraMatch[0].replace(/[#*`\[\]()]/g, '').trim() : 'Journal entry';
+      
+      // Extract text after the marker
+      let startIdx = journalMarkerIdx + "captain mcallister's journal:".length;
+      const remaining = docContent.substring(startIdx);
+      
+      // Find the next major heading (##) or end of content
+      const nextHeadingIdx = remaining.indexOf('\n##');
+      const endIdx = nextHeadingIdx === -1 ? remaining.length : nextHeadingIdx;
+      
+      // Extract and clean the text
+      let journalText = remaining.substring(0, endIdx)
+        .replace(/\n\n+/g, ' ') // Replace multiple newlines with space
+        .replace(/\n/g, ' ')     // Replace single newlines with space
+        .replace(/[#*`\[\]()]/g, '') // Remove markdown formatting
+        .replace(/\s+/g, ' ')    // Normalize whitespace
+        .trim();
+      
+      return journalText;
     }
 
     function speakJournalEntry(docId) {
