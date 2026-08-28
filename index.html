@@ -815,6 +815,22 @@
       currentDrawerDocId = m.doc_id;
       currentTourIndex = idx !== undefined ? idx : APP_DATA.milestones.findIndex(x => x.id === m.id);
 
+      // Match milestone to daily coordinate for tour continuation
+      let coordIdx = APP_DATA.daily_coordinates.findIndex(c => c.doc_id === m.doc_id);
+      if (coordIdx === -1 && APP_DATA.daily_coordinates.length > 0) {
+        let minDist = Infinity;
+        APP_DATA.daily_coordinates.forEach((c, i) => {
+          const d = Math.hypot(c.lat - m.lat, c.lng - m.lng);
+          if (d < minDist) {
+            minDist = d;
+            coordIdx = i;
+          }
+        });
+      }
+      if (coordIdx > -1) {
+        currentTourDocIndex = coordIdx;
+      }
+
       document.getElementById('drawerVesselBadge').textContent = m.vessel;
       document.getElementById('drawerDateBadge').textContent = m.date;
       document.getElementById('drawerTitle').textContent = m.title;
@@ -897,10 +913,156 @@
     }
 
     // -------------------------------------------------------------
-    // Tour Mode Logic
+    // Tour Mode & Text-to-Speech Processing
     // -------------------------------------------------------------
-    // Tour Mode Logic
-    // -----
+    // Array of normalization rules for Text-to-Speech pronunciation
+    const NAV_SPEECH_REPLACEMENTS = [
+      // 1. Observational latitude & longitude prefixes
+      { pattern: /\bObs\.\s*Lat\b\.?/gi, replacement: "Observed Latitude " },
+      { pattern: /\bLat\b\.?\s*by\s*Obs\b\.?/gi, replacement: "Latitude by Observation " },
+      { pattern: /\bLat\b\.?\s*obs'?d\b\.?/gi, replacement: "Latitude observed " },
+      { pattern: /\bObs\.?\s*Lat\b/gi, replacement: "Observed Latitude " },
+
+      // 2. Navigational Latitude & Longitude patterns
+      // Coordinates with Lat/Latitude prefix: e.g. "Lat. 27° 58N", "L.a.t. 27 58N", "Lat 27 58 N", "Latitude 27° 58' N"
+      {
+        pattern: /\b(?:L\.a\.t\.|Lat\.|Lat|Latitude)\s*(\d{1,2})[°\s']+(\d{1,2})\s*['"]?\s*([NS])\b/gi,
+        replacement: (m, deg, min, hem) => `Latitude ${deg} degrees ${min} ${hem.toUpperCase() === 'N' ? 'North' : 'South'}`
+      },
+      // Coordinates with Long/Longitude prefix: e.g. "Long 55'50W", "Long. 55° 50W", "L.o.n.g. 55 50W", "Longitude 67° 10W"
+      {
+        pattern: /\b(?:L\.o\.n\.g\.|Long\.|Lon\.|Long|Lon|Longitude)\s*(\d{1,3})[°\s']+(\d{1,2})\s*['"]?\s*([EW])\b/gi,
+        replacement: (m, deg, min, hem) => `Longitude ${deg} degrees ${min} ${hem.toUpperCase() === 'W' ? 'West' : 'East'}`
+      },
+      // Degree-only coordinates with prefix: e.g. "Lat. 34°N", "Long. 59°W"
+      {
+        pattern: /\b(?:L\.a\.t\.|Lat\.|Lat|Latitude)\s*(\d{1,2})\s*°\s*([NS])\b/gi,
+        replacement: (m, deg, hem) => `Latitude ${deg} degrees ${hem.toUpperCase() === 'N' ? 'North' : 'South'}`
+      },
+      {
+        pattern: /\b(?:L\.o\.n\.g\.|Long\.|Lon\.|Long|Lon|Longitude)\s*(\d{1,3})\s*°\s*([EW])\b/gi,
+        replacement: (m, deg, hem) => `Longitude ${deg} degrees ${hem.toUpperCase() === 'W' ? 'West' : 'East'}`
+      },
+      // Degree + minute coordinates with prefix without hemisphere: e.g. "Lat. 14°33", "Long. 60° 25"
+      {
+        pattern: /\b(?:L\.a\.t\.|Lat\.|Lat|Latitude)\s*(\d{1,2})[°\s']+(\d{1,2})\b(?!\s*(?:hours|knots|miles|tons|days|shingles|hogsheads))/gi,
+        replacement: (m, deg, min) => `Latitude ${deg} degrees ${min}`
+      },
+      {
+        pattern: /\b(?:L\.o\.n\.g\.|Long\.|Lon\.|Long|Lon|Longitude)\s*(\d{1,3})[°\s']+(\d{1,2})\b(?!\s*(?:hours|knots|miles|tons|days|shingles|hogsheads))/gi,
+        replacement: (m, deg, min) => `Longitude ${deg} degrees ${min}`
+      },
+      // Coordinates without prefix: "40° 09N", "67° 10W", "55'50W", "27 58N" (when followed by N/S or E/W)
+      {
+        pattern: /\b(\d{1,2})[°\s']+(\d{1,2})\s*['"]?\s*([NS])\b/gi,
+        replacement: (m, deg, min, hem) => `${deg} degrees ${min} ${hem.toUpperCase() === 'N' ? 'North' : 'South'}`
+      },
+      {
+        pattern: /\b(\d{1,3})[°\s']+(\d{1,2})\s*['"]?\s*([EW])\b/gi,
+        replacement: (m, deg, min, hem) => `${deg} degrees ${min} ${hem.toUpperCase() === 'W' ? 'West' : 'East'}`
+      },
+      // Degree only without prefix: "34°N", "59°W"
+      {
+        pattern: /\b(\d{1,2})\s*°\s*([NS])\b/gi,
+        replacement: (m, deg, hem) => `${deg} degrees ${hem.toUpperCase() === 'N' ? 'North' : 'South'}`
+      },
+      {
+        pattern: /\b(\d{1,3})\s*°\s*([EW])\b/gi,
+        replacement: (m, deg, hem) => `${deg} degrees ${hem.toUpperCase() === 'W' ? 'West' : 'East'}`
+      },
+
+      // Standalone prefixes remaining:
+      { pattern: /\bL\.a\.t\.\b/gi, replacement: "Latitude" },
+      { pattern: /\bLat\.\b/gi, replacement: "Latitude" },
+      { pattern: /\bLat\b(?=\s+\d|\s+by|\s+obs|\s+in)/gi, replacement: "Latitude" },
+      { pattern: /\bL\.o\.n\.g\.\b/gi, replacement: "Longitude" },
+      { pattern: /\bLong\.\b/gi, replacement: "Longitude" },
+      { pattern: /\bLon\.\b/gi, replacement: "Longitude" },
+      { pattern: /\bLong\b(?=\s+\d)/gi, replacement: "Longitude" },
+      { pattern: /\bLon\b(?=\s+\d)/gi, replacement: "Longitude" },
+
+      // Degrees and fractions
+      { pattern: /(\d{1,3})½°/g, replacement: "$1 and a half degrees" },
+      { pattern: /(\d+)\s*°(?!\s*F\b)/g, replacement: "$1 degrees" },
+
+      // 3. Winds & Compass Direction Abbreviations
+      // Secondary intercardinal points with dots/spaces (W.S.W., E. N.E., N.N.E., etc.)
+      { pattern: /\bE[\.\s]+N[\.\s]*E(?:\.|\b)/gi, replacement: "East North East" },
+      { pattern: /\bE[\.\s]+S[\.\s]*E(?:\.|\b)/gi, replacement: "East South East" },
+      { pattern: /\bW[\.\s]+N[\.\s]*W(?:\.|\b)/gi, replacement: "West North West" },
+      { pattern: /\bW[\.\s]+S[\.\s]*W(?:\.|\b)/gi, replacement: "West South West" },
+      { pattern: /\bN[\.\s]+N[\.\s]*E(?:\.|\b)/gi, replacement: "North North East" },
+      { pattern: /\bN[\.\s]+N[\.\s]*W(?:\.|\b)/gi, replacement: "North North West" },
+      { pattern: /\bS[\.\s]+S[\.\s]*E(?:\.|\b)/gi, replacement: "South South East" },
+      { pattern: /\bS[\.\s]+S[\.\s]*W(?:\.|\b)/gi, replacement: "South South West" },
+
+      // Solid 3-letter point abbreviations
+      { pattern: /\bWSW\b/g, replacement: "West South West" },
+      { pattern: /\bWNW\b/g, replacement: "West North West" },
+      { pattern: /\bENE\b/g, replacement: "East North East" },
+      { pattern: /\bESE\b/g, replacement: "East South East" },
+      { pattern: /\bNNE\b/g, replacement: "North North East" },
+      { pattern: /\bNNW\b/g, replacement: "North North West" },
+      { pattern: /\bSSE\b/g, replacement: "South South East" },
+      { pattern: /\bSSW\b/g, replacement: "South South West" },
+
+      // Compass "by" points (e.g. N by E, N. by E., W by N, E. by S.)
+      { pattern: /\bN\.?\s*by\s*E(?:\.|\b)/gi, replacement: "North by East" },
+      { pattern: /\bN\.?\s*by\s*W(?:\.|\b)/gi, replacement: "North by West" },
+      { pattern: /\bS\.?\s*by\s*E(?:\.|\b)/gi, replacement: "South by East" },
+      { pattern: /\bS\.?\s*by\s*W(?:\.|\b)/gi, replacement: "South by West" },
+      { pattern: /\bE\.?\s*by\s*N(?:\.|\b)/gi, replacement: "East by North" },
+      { pattern: /\bE\.?\s*by\s*S(?:\.|\b)/gi, replacement: "East by South" },
+      { pattern: /\bW\.?\s*by\s*N(?:\.|\b)/gi, replacement: "West by North" },
+      { pattern: /\bW\.?\s*by\s*S(?:\.|\b)/gi, replacement: "West by South" },
+      { pattern: /\bN\.?E\.?\s*by\s*N(?:\.|\b)/gi, replacement: "North East by North" },
+      { pattern: /\bN\.?E\.?\s*by\s*E(?:\.|\b)/gi, replacement: "North East by East" },
+      { pattern: /\bS\.?E\.?\s*by\s*S(?:\.|\b)/gi, replacement: "South East by South" },
+      { pattern: /\bS\.?E\.?\s*by\s*E(?:\.|\b)/gi, replacement: "South East by East" },
+      { pattern: /\bN\.?W\.?\s*by\s*N(?:\.|\b)/gi, replacement: "North West by North" },
+      { pattern: /\bN\.?W\.?\s*by\s*W(?:\.|\b)/gi, replacement: "North West by West" },
+      { pattern: /\bS\.?W\.?\s*by\s*S(?:\.|\b)/gi, replacement: "South West by South" },
+      { pattern: /\bS\.?W\.?\s*by\s*W(?:\.|\b)/gi, replacement: "South West by West" },
+
+      // 2-letter point abbreviations with dots (N.E., S.W., S.E., N.W.)
+      { pattern: /\bN\.\s*E(?:\.|\b)/gi, replacement: "North East" },
+      { pattern: /\bN\.\s*W(?:\.|\b)/gi, replacement: "North West" },
+      { pattern: /\bS\.\s*E(?:\.|\b)/gi, replacement: "South East" },
+      { pattern: /\bS\.\s*W(?:\.|\b)/gi, replacement: "South West" },
+
+      // Intercardinals in wind/course/steering context
+      {
+        pattern: /\b(wind|breeze|steer|steering|course|heading|from|to|at|about)\s+(?:about\s+)?(NE|NW|SE|SW)\b/gi,
+        replacement: (m, p1, p2) => `${p1} ${p2.toUpperCase() === 'NE' ? 'North East' : p2.toUpperCase() === 'NW' ? 'North West' : p2.toUpperCase() === 'SE' ? 'South East' : 'South West'}`
+      },
+      // Cardinal directions after wind/breeze/steer/course
+      {
+        pattern: /\b(wind|breeze|steer|steering|course|heading|from|at)\s+(N|S|E|W)\b(?!\.)/gi,
+        replacement: (m, p1, p2) => `${p1} ${p2.toUpperCase() === 'N' ? 'North' : p2.toUpperCase() === 'S' ? 'South' : p2.toUpperCase() === 'E' ? 'East' : 'West'}`
+      },
+
+      // 4. Other nautical abbreviations & units
+      { pattern: /(\d+)\s*°\s*F\b/g, replacement: "$1 degrees Fahrenheit" },
+      { pattern: /\bHhds\b/g, replacement: "hogsheads" },
+      { pattern: /\b8\.5-ft\b/g, replacement: "eight and a half foot" },
+      { pattern: /\b(\d+)-hour\b/g, replacement: "$1 hour" },
+      { pattern: /\bNB\b/g, replacement: "New Brunswick" }
+    ];
+
+    function normalizeTextForSpeech(text) {
+      if (!text) return "";
+      let res = text;
+      for (const rule of NAV_SPEECH_REPLACEMENTS) {
+        res = res.replace(rule.pattern, rule.replacement);
+      }
+      // Remove duplicate adjacent Latitude / Longitude words
+      res = res.replace(/\bLatitude\s+Latitude\b/gi, "Latitude");
+      res = res.replace(/\bLongitude\s+Longitude\b/gi, "Longitude");
+      // Clean up whitespace
+      res = res.replace(/\s+/g, " ").trim();
+      return res;
+    }
+
     function numberToWords(num) {
       // Convert decimal number to words for text-to-speech
       const ones = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
@@ -963,6 +1125,10 @@
       // Cancel any existing speech
       speechSynthesis.cancel();
       isSpeechPaused = false;
+      if (tourTimer) {
+        clearTimeout(tourTimer);
+        tourTimer = null;
+      }
       
       // Get current coordinate for position info
       const coord = APP_DATA.daily_coordinates[currentTourDocIndex];
@@ -974,8 +1140,15 @@
         return;
       }
       
-      // Combine coordinates and journal quote
-      let fullText = coordText + ' ' + drawerQuoteElement.textContent.trim();
+      // Clean quote text (strip surrounding quotes if present)
+      let rawQuote = drawerQuoteElement.textContent.trim();
+      if (rawQuote.startsWith('"') && rawQuote.endsWith('"')) {
+        rawQuote = rawQuote.slice(1, -1).trim();
+      }
+      
+      // Combine coordinates and journal quote, then normalize through speech transformation array
+      let fullText = coordText + ' ' + rawQuote;
+      fullText = normalizeTextForSpeech(fullText);
       
       currentSpeechUtterance = new SpeechSynthesisUtterance(fullText);
       currentSpeechUtterance.rate = 0.85;
@@ -983,7 +1156,7 @@
       currentSpeechUtterance.volume = 1.0;
       
       currentSpeechUtterance.onend = () => {
-        if (isTourPlaying) {
+        if (isTourPlaying && !isSpeechPaused) {
           // Pause 3 seconds after speech ends, then move to next entry
           tourTimer = setTimeout(() => {
             navigateTour(1);
@@ -1012,17 +1185,13 @@
     }
 
     function startTour() {
-      // Check if a coordinate drawer is currently open (coordinate was clicked)
-      const drawer = document.getElementById('summaryDrawer');
-      const isDrawerOpen = !drawer.classList.contains('translate-x-full');
+      isTourPlaying = true;
+      isSpeechPaused = false;
+      document.getElementById('tourBar').classList.remove('hidden');
       
-      // If no drawer is open, start from the first coordinate
-      if (!isDrawerOpen) {
+      if (currentTourDocIndex < 0 || currentTourDocIndex >= APP_DATA.daily_coordinates.length) {
         currentTourDocIndex = 0;
       }
-      // else: currentTourDocIndex is already set by openCoordDrawer when coordinate was clicked
-      
-      document.getElementById('tourBar').classList.remove('hidden');
       
       // Show current coordinate and speak it
       const coord = APP_DATA.daily_coordinates[currentTourDocIndex];
@@ -1041,11 +1210,18 @@
       speechSynthesis.cancel();
       isSpeechPaused = false;
       isTourPlaying = false;
-      clearInterval(tourTimer);
+      if (tourTimer) {
+        clearTimeout(tourTimer);
+        tourTimer = null;
+      }
       updateTourPlayButton();
     }
 
     function navigateTour(delta) {
+      if (tourTimer) {
+        clearTimeout(tourTimer);
+        tourTimer = null;
+      }
       currentTourDocIndex += delta;
       if (currentTourDocIndex < 0) currentTourDocIndex = APP_DATA.daily_coordinates.length - 1;
       if (currentTourDocIndex >= APP_DATA.daily_coordinates.length) currentTourDocIndex = 0;
@@ -1072,9 +1248,20 @@
 
     function toggleTourPlay() {
       if (!isTourPlaying) {
-        // Start playing
+        // Start playing from currently selected location
         isTourPlaying = true;
         isSpeechPaused = false;
+        document.getElementById('tourBar').classList.remove('hidden');
+
+        if (currentTourDocIndex < 0 || currentTourDocIndex >= APP_DATA.daily_coordinates.length) {
+          currentTourDocIndex = 0;
+        }
+
+        const coord = APP_DATA.daily_coordinates[currentTourDocIndex];
+        if (coord) {
+          openCoordDrawer(coord);
+          updateTourProgress();
+        }
         speakJournalEntry();
       } else {
         // Pause/Resume speech
