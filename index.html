@@ -840,6 +840,12 @@
 
     function openCoordDrawer(c) {
       currentDrawerDocId = c.doc_id;
+      
+      // Store the index of the current coordinate for tour resumption
+      const coordIndex = APP_DATA.daily_coordinates.findIndex(coord => coord.id === c.id);
+      if (coordIndex > -1) {
+        currentTourDocIndex = coordIndex;
+      }
 
       document.getElementById('drawerVesselBadge').textContent = c.vessel;
       document.getElementById('drawerDateBadge').textContent = c.date;
@@ -893,13 +899,74 @@
     // -------------------------------------------------------------
     // Tour Mode Logic
     // -------------------------------------------------------------
-    // Tour Mode Logic - Document & Speech-Based
-    // Reads only the text displayed in the summary drawer
+    // Tour Mode Logic
+    // -----
+    function numberToWords(num) {
+      // Convert decimal number to words for text-to-speech
+      const ones = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+      const teens = ['ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+      const tens = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+      
+      const str = num.toFixed(2);
+      const [intPart, decPart] = str.split('.');
+      const intNum = parseInt(intPart);
+      
+      let result = '';
+      
+      // Convert integer part
+      if (intNum === 0) {
+        result = 'zero';
+      } else if (intNum < 10) {
+        result = ones[intNum];
+      } else if (intNum < 20) {
+        result = teens[intNum - 10];
+      } else if (intNum < 100) {
+        const t = Math.floor(intNum / 10);
+        const o = intNum % 10;
+        result = tens[t] + (o > 0 ? ' ' + ones[o] : '');
+      } else {
+        const h = Math.floor(intNum / 100);
+        const remainder = intNum % 100;
+        result = ones[h] + ' hundred';
+        if (remainder > 0) {
+          if (remainder < 10) {
+            result += ' ' + ones[remainder];
+          } else if (remainder < 20) {
+            result += ' ' + teens[remainder - 10];
+          } else {
+            const t = Math.floor(remainder / 10);
+            const o = remainder % 10;
+            result += ' ' + tens[t] + (o > 0 ? ' ' + ones[o] : '');
+          }
+        }
+      }
+      
+      // Add decimal part
+      result += ' point ';
+      const dec1 = parseInt(decPart[0]);
+      const dec2 = parseInt(decPart[1]);
+      result += ones[dec1] + ' ' + ones[dec2];
+      
+      return result;
+    }
+
+    function formatCoordsForSpeech(lat, lng) {
+      // Convert coordinates to readable text for text-to-speech
+      const latDir = lat >= 0 ? 'North' : 'South';
+      const lngDir = lng >= 0 ? 'East' : 'West';
+      const latNum = numberToWords(Math.abs(lat));
+      const lngNum = numberToWords(Math.abs(lng));
+      return `At position ${latNum} degrees ${latDir}, ${lngNum} degrees ${lngDir}.`;
+    }
 
     function speakJournalEntry() {
       // Cancel any existing speech
       speechSynthesis.cancel();
       isSpeechPaused = false;
+      
+      // Get current coordinate for position info
+      const coord = APP_DATA.daily_coordinates[currentTourDocIndex];
+      const coordText = coord ? formatCoordsForSpeech(coord.lat, coord.lng) : '';
       
       // Read only the text displayed in the drawer under "Captain McAllister's Journal:"
       const drawerQuoteElement = document.getElementById('drawerQuote');
@@ -907,8 +974,10 @@
         return;
       }
       
-      const journalText = drawerQuoteElement.textContent.trim();
-      currentSpeechUtterance = new SpeechSynthesisUtterance(journalText);
+      // Combine coordinates and journal quote
+      let fullText = coordText + ' ' + drawerQuoteElement.textContent.trim();
+      
+      currentSpeechUtterance = new SpeechSynthesisUtterance(fullText);
       currentSpeechUtterance.rate = 0.85;
       currentSpeechUtterance.pitch = 1.0;
       currentSpeechUtterance.volume = 1.0;
@@ -943,13 +1012,25 @@
     }
 
     function startTour() {
-      // Start from first daily coordinate
-      currentTourDocIndex = 0;
+      // Check if a coordinate drawer is currently open (coordinate was clicked)
+      const drawer = document.getElementById('summaryDrawer');
+      const isDrawerOpen = !drawer.classList.contains('translate-x-full');
+      
+      // If no drawer is open, start from the first coordinate
+      if (!isDrawerOpen) {
+        currentTourDocIndex = 0;
+      }
+      // else: currentTourDocIndex is already set by openCoordDrawer when coordinate was clicked
       
       document.getElementById('tourBar').classList.remove('hidden');
       
-      // Show first coordinate and speak it
+      // Show current coordinate and speak it
       const coord = APP_DATA.daily_coordinates[currentTourDocIndex];
+      if (!coord) {
+        currentTourDocIndex = 0;
+        return;
+      }
+      
       openCoordDrawer(coord);
       updateTourProgress();
       speakJournalEntry();
