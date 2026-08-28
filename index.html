@@ -319,7 +319,7 @@
           <div class="flex items-center space-x-2">
             <span class="w-2.5 h-2.5 rounded-full bg-nautical-crimson animate-ping"></span>
             <span class="text-xs font-serif font-bold text-nautical-gold">Tour Mode:</span>
-            <span id="tourProgressText" class="text-xs font-mono text-parchment-200">Milestone 1 / 16</span>
+            <span id="tourProgressText" class="text-xs font-mono text-parchment-200">Entry 1 / 82</span>
           </div>
           <div class="flex items-center space-x-1">
             <button onclick="navigateTour(-1)" class="p-1 rounded-full hover:bg-parchment-800 transition-colors" title="Previous Stop">
@@ -703,6 +703,8 @@
 
         marker.on('click', () => {
           openCoordDrawer(c);
+          // Trigger text-to-speech when a coordinate is clicked
+          speakJournalEntry();
         });
       });
     }
@@ -938,24 +940,14 @@
     }
 
     function startTour() {
-      // Check if a location is currently selected on the map
-      if (currentDrawerDocId) {
-        // Find the milestone/coordinate that matches the current drawer document
-        const milestoneIdx = APP_DATA.milestones.findIndex(m => m.doc_id === currentDrawerDocId);
-        if (milestoneIdx > -1) {
-          currentTourDocIndex = milestoneIdx;
-        } else {
-          currentTourDocIndex = 0;
-        }
-      } else {
-        // Start from the first milestone
-        currentTourDocIndex = 0;
-      }
+      // Start from first daily coordinate
+      currentTourDocIndex = 0;
       
       document.getElementById('tourBar').classList.remove('hidden');
       
-      // Populate drawer with first milestone and speak it
-      openSummaryDrawer(APP_DATA.milestones[currentTourDocIndex], currentTourDocIndex);
+      // Show first coordinate and speak it
+      const coord = APP_DATA.daily_coordinates[currentTourDocIndex];
+      openCoordDrawer(coord);
       updateTourProgress();
       speakJournalEntry();
     }
@@ -971,11 +963,16 @@
 
     function navigateTour(delta) {
       currentTourDocIndex += delta;
-      if (currentTourDocIndex < 0) currentTourDocIndex = APP_DATA.milestones.length - 1;
-      if (currentTourDocIndex >= APP_DATA.milestones.length) currentTourDocIndex = 0;
+      if (currentTourDocIndex < 0) currentTourDocIndex = APP_DATA.daily_coordinates.length - 1;
+      if (currentTourDocIndex >= APP_DATA.daily_coordinates.length) currentTourDocIndex = 0;
       
-      // Populate drawer with current milestone
-      openSummaryDrawer(APP_DATA.milestones[currentTourDocIndex], currentTourDocIndex);
+      // Show current coordinate and fly map to it
+      const coord = APP_DATA.daily_coordinates[currentTourDocIndex];
+      openCoordDrawer(coord);
+      
+      // Animate map movement to this location
+      mapInstance.flyTo([coord.lat, coord.lng], Math.max(mapInstance.getZoom(), 5), { duration: 0.8 });
+      
       updateTourProgress();
       
       if (isTourPlaying) {
@@ -984,8 +981,9 @@
     }
 
     function updateTourProgress() {
-      const milestone = APP_DATA.milestones[currentTourDocIndex];
-      document.getElementById('tourProgressText').textContent = `Milestone ${currentTourDocIndex + 1} / ${APP_DATA.milestones.length}`;
+      const totalCoords = APP_DATA.daily_coordinates.length;
+      const currentNum = currentTourDocIndex + 1;
+      document.getElementById('tourProgressText').textContent = `Entry ${currentNum} / ${totalCoords}`;
     }
 
     function toggleTourPlay() {
