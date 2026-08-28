@@ -771,7 +771,7 @@
         });
 
         marker.on('click', () => {
-          openSummaryDrawer(m, idx);
+          openMilestoneDrawerAndSpeak(m, idx);
         });
       });
     }
@@ -789,13 +789,13 @@
       switchTab('map');
       if (val === 'keziah_2') {
         mapInstance.flyTo([13.09, -59.61], 7);
-        openSummaryDrawer(APP_DATA.milestones[11], 11);
+        openMilestoneDrawerAndSpeak(APP_DATA.milestones[11], 11);
       } else if (val === 'emerald') {
         mapInstance.flyTo([22.0, -61.5], 5);
-        openSummaryDrawer(APP_DATA.milestones[12], 12);
+        openMilestoneDrawerAndSpeak(APP_DATA.milestones[12], 12);
       } else if (val === 'woodbine') {
         mapInstance.flyTo([30.0, -63.0], 4);
-        openSummaryDrawer(APP_DATA.milestones[14], 14);
+        openMilestoneDrawerAndSpeak(APP_DATA.milestones[14], 14);
       } else {
         resetMapView();
       }
@@ -806,7 +806,7 @@
     }
 
     // -------------------------------------------------------------
-    // Dynamic Summary Drawer Logic
+    // Dynamic Summary Drawer Logic & Milestone Narrative Integration
     // -------------------------------------------------------------
     let currentDrawerDocId = 1;
 
@@ -872,6 +872,51 @@
       };
     }
 
+    function findAssociatedMilestone(c) {
+      if (!c) return null;
+      const milestones = APP_DATA.milestones;
+      
+      const directMap = {
+        'coord_01': 'm01',
+        'coord_06': 'm02', 'coord_07': 'm02', 'coord_08': 'm02', 'coord_09': 'm02', 'coord_10': 'm02', 'coord_11': 'm02',
+        'coord_12': 'm03',
+        'coord_20': 'm04',
+        'coord_28': 'm05', 'coord_29': 'm05',
+        'coord_30': 'm06',
+        'coord_31': 'm07',
+        'coord_32': 'm08',
+        'coord_36': 'm09',
+        'coord_53': 'm10',
+        'coord_54': 'm11', 'coord_55': 'm11', 'coord_56': 'm11',
+        'coord_65': 'm12', 'coord_66': 'm12',
+        'coord_67': 'm13', 'coord_69': 'm13', 'coord_70': 'm13', 'coord_74': 'm13',
+        'coord_75': 'm15', 'coord_77': 'm15', 'coord_78': 'm15', 'coord_79': 'm15',
+        'coord_80': 'm16', 'coord_81': 'm16', 'coord_82': 'm16'
+      };
+
+      if (directMap[c.id]) {
+        return milestones.find(m => m.id === directMap[c.id]) || null;
+      }
+
+      let best = null;
+      let minDist = Infinity;
+      for (const m of milestones) {
+        if (m.doc_id === c.doc_id) {
+          const d = Math.hypot(m.lat - c.lat, m.lng - c.lng);
+          if (d < minDist && d < 2.0) {
+            minDist = d;
+            best = m;
+          }
+        }
+      }
+      return best;
+    }
+
+    function openMilestoneDrawerAndSpeak(m, idx) {
+      openSummaryDrawer(m, idx);
+      speakJournalEntry();
+    }
+
     function openSummaryDrawer(m, idx) {
       currentDrawerDocId = m.doc_id;
       currentTourIndex = idx !== undefined ? idx : APP_DATA.milestones.findIndex(x => x.id === m.id);
@@ -897,12 +942,15 @@
 
       document.getElementById('drawerVesselBadge').textContent = m.vessel;
       document.getElementById('drawerDateBadge').textContent = m.date;
-      document.getElementById('drawerTitle').textContent = m.title;
+      document.getElementById('drawerTitle').innerHTML = `
+        <span>${m.title}</span>
+        <span class="block text-[11px] font-sans font-semibold text-nautical-amber tracking-wide mt-0.5">★ Notable Point of Interest</span>
+      `;
       document.getElementById('drawerRegion').textContent = m.region;
       document.getElementById('drawerCoords').textContent = coords.full;
       document.getElementById('drawerSummary').textContent = m.summary;
       document.getElementById('drawerQuote').textContent = m.quote;
-      document.getElementById('drawerStepCount').textContent = `Milestone ${currentTourIndex + 1} of ${APP_DATA.milestones.length}`;
+      document.getElementById('drawerStepCount').textContent = `Notable Milestone ${currentTourIndex + 1} of ${APP_DATA.milestones.length}${coordIdx > -1 ? ` • Tour Entry ${coordIdx + 1}/${APP_DATA.daily_coordinates.length}` : ''}`;
       
       document.getElementById('drawerReadBtn').innerHTML = `
         <i data-lucide="book-open" class="w-4 h-4 text-nautical-gold inline mr-1.5"></i>
@@ -929,15 +977,27 @@
       }
 
       const coords = parseCoordsFromEntry(c.note, c.lat, c.lng);
+      const m = findAssociatedMilestone(c);
 
       document.getElementById('drawerVesselBadge').textContent = c.vessel;
       document.getElementById('drawerDateBadge').textContent = c.date;
-      document.getElementById('drawerTitle').textContent = `Daily Log Observation — ${c.date}`;
-      document.getElementById('drawerRegion').textContent = `At Sea on the ${c.vessel}`;
+
+      if (m) {
+        document.getElementById('drawerTitle').innerHTML = `
+          <span>${c.date} • ${m.title}</span>
+          <span class="block text-[11px] font-sans font-semibold text-nautical-amber tracking-wide mt-0.5">★ Notable Point of Interest: ${m.title}</span>
+        `;
+        document.getElementById('drawerRegion').textContent = `${m.region} (${c.vessel})`;
+        document.getElementById('drawerSummary').textContent = `${m.summary}`;
+      } else {
+        document.getElementById('drawerTitle').textContent = `Daily Log Observation — ${c.date}`;
+        document.getElementById('drawerRegion').textContent = `At Sea on the ${c.vessel}`;
+        document.getElementById('drawerSummary').textContent = `Noon observation and daily log recorded by Captain George C. McAllister in Document McAllister${String(c.doc_id).padStart(3, '0')}.`;
+      }
+
       document.getElementById('drawerCoords').textContent = coords.full;
-      document.getElementById('drawerSummary').textContent = `Noon observation and daily log recorded by Captain George C. McAllister in Document McAllister${String(c.doc_id).padStart(3, '0')}.`;
       document.getElementById('drawerQuote').textContent = `"${c.note}"`;
-      document.getElementById('drawerStepCount').textContent = `Log Point ID: ${c.id}`;
+      document.getElementById('drawerStepCount').textContent = `Point ${currentTourDocIndex + 1} of ${APP_DATA.daily_coordinates.length}${m ? ` • ${m.title}` : ''}`;
 
       document.getElementById('drawerReadBtn').innerHTML = `
         <i data-lucide="book-open" class="w-4 h-4 text-nautical-gold inline mr-1.5"></i>
@@ -946,6 +1006,10 @@
       lucide.createIcons();
 
       highlightActiveElement(`dot-${c.id}`);
+      if (m) {
+        const milestoneMarkerEl = document.getElementById(`marker-${m.id}`);
+        if (milestoneMarkerEl) milestoneMarkerEl.classList.add('active-marker-pulse');
+      }
 
       const drawer = document.getElementById('summaryDrawer');
       drawer.classList.remove('translate-x-full');
@@ -957,6 +1021,7 @@
       if (activeMarkerElement) {
         activeMarkerElement.classList.remove('active-marker-pulse');
       }
+      document.querySelectorAll('.active-marker-pulse').forEach(el => el.classList.remove('active-marker-pulse'));
       const el = document.getElementById(id);
       if (el) {
         el.classList.add('active-marker-pulse');
@@ -966,10 +1031,8 @@
 
     function closeSummaryDrawer() {
       document.getElementById('summaryDrawer').classList.add('translate-x-full');
-      if (activeMarkerElement) {
-        activeMarkerElement.classList.remove('active-marker-pulse');
-        activeMarkerElement = null;
-      }
+      document.querySelectorAll('.active-marker-pulse').forEach(el => el.classList.remove('active-marker-pulse'));
+      activeMarkerElement = null;
     }
 
     function jumpToDocumentFromDrawer() {
@@ -1163,7 +1226,7 @@
     }
 
     function speakJournalEntry() {
-      // Cancel any existing speech
+      // Immediately cancel any existing speech and pending timers
       speechSynthesis.cancel();
       isSpeechPaused = false;
       if (tourTimer) {
@@ -1185,6 +1248,7 @@
       
       // Normalize journal entry directly through speech transformation array
       let fullText = normalizeTextForSpeech(rawQuote);
+      if (!fullText) return;
       
       currentSpeechUtterance = new SpeechSynthesisUtterance(fullText);
       currentSpeechUtterance.rate = 0.85;
@@ -1204,8 +1268,11 @@
         console.log('Speech synthesis error:', e);
       };
       
-      speechSynthesis.speak(currentSpeechUtterance);
-      updateTourPlayButton();
+      // Microtask tick ensures prior speech cancellation is fully processed by browser audio engine
+      setTimeout(() => {
+        speechSynthesis.speak(currentSpeechUtterance);
+        updateTourPlayButton();
+      }, 15);
     }
 
     function updateTourPlayButton() {
@@ -1270,10 +1337,7 @@
       mapInstance.flyTo([coord.lat, coord.lng], Math.max(mapInstance.getZoom(), 5), { duration: 0.8 });
       
       updateTourProgress();
-      
-      if (isTourPlaying) {
-        speakJournalEntry();
-      }
+      speakJournalEntry();
     }
 
     function updateTourProgress() {
@@ -1389,6 +1453,7 @@
       const nearestCoord = APP_DATA.daily_coordinates.find(c => Math.abs(c.lat - lat) < 0.8 && Math.abs(c.lng - lng) < 0.8);
       if (nearestCoord) {
         openCoordDrawer(nearestCoord);
+        speakJournalEntry();
       }
     }
 
@@ -1398,8 +1463,10 @@
       switchTab('map');
       if (m) {
         openSummaryDrawer(m);
+        speakJournalEntry();
       } else if (c) {
         openCoordDrawer(c);
+        speakJournalEntry();
       } else {
         resetMapView();
       }
