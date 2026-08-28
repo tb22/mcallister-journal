@@ -712,7 +712,7 @@
 
       APP_DATA.milestones.forEach((m, idx) => {
         if (filter !== 'all') {
-          if (filter === 'keziah_1' && !m.vessel.includes('Keziah') && m.category !== 'departure' && m.category !== 'arrival') return;
+          if (filter === 'keziah_1' && (!m.vessel.includes('Keziah') || m.id === 'm12') && m.category !== 'departure' && m.category !== 'arrival') return;
           if (filter === 'keziah_2' && m.id !== 'm12') return;
           if (filter === 'emerald' && !m.vessel.includes('Emerald')) return;
           if (filter === 'woodbine' && !m.vessel.includes('Woodbine')) return;
