@@ -319,7 +319,7 @@
           <div class="flex items-center space-x-2">
             <span class="w-2.5 h-2.5 rounded-full bg-nautical-crimson animate-ping"></span>
             <span class="text-xs font-serif font-bold text-nautical-gold">Tour Mode:</span>
-            <span id="tourProgressText" class="text-xs font-mono text-parchment-200">Doc 001 / 60</span>
+            <span id="tourProgressText" class="text-xs font-mono text-parchment-200">Milestone 1 / 16</span>
           </div>
           <div class="flex items-center space-x-1">
             <button onclick="navigateTour(-1)" class="p-1 rounded-full hover:bg-parchment-800 transition-colors" title="Previous Stop">
@@ -892,50 +892,20 @@
     // Tour Mode Logic
     // -------------------------------------------------------------
     // Tour Mode Logic - Document & Speech-Based
-    // -----
-    function extractJournalQuote(docContent) {
-      // Find the position of "Captain McAllister's Journal:"
-      const journalMarkerIdx = docContent.toLowerCase().indexOf("captain mcallister's journal:");
-      if (journalMarkerIdx === -1) {
-        // If no journal marker, extract first non-heading paragraph
-        const lines = docContent.split('\n');
-        for (let line of lines) {
-          const cleaned = line.replace(/^#+\s*/, '').trim();
-          if (cleaned && !cleaned.startsWith('#')) {
-            return cleaned.replace(/[#*`\[\]()]/g, '').trim();
-          }
-        }
-        return 'Journal entry';
-      }
-      
-      // Extract text after the marker
-      let startIdx = journalMarkerIdx + "captain mcallister's journal:".length;
-      const remaining = docContent.substring(startIdx);
-      
-      // Find the next major heading (##) or end of content
-      const nextHeadingIdx = remaining.indexOf('\n##');
-      const endIdx = nextHeadingIdx === -1 ? remaining.length : nextHeadingIdx;
-      
-      // Extract and clean the text
-      let journalText = remaining.substring(0, endIdx)
-        .replace(/\n\n+/g, ' ') // Replace multiple newlines with space
-        .replace(/\n/g, ' ')     // Replace single newlines with space
-        .replace(/[#*`\[\]()]/g, '') // Remove markdown formatting
-        .replace(/\s+/g, ' ')    // Normalize whitespace
-        .trim();
-      
-      return journalText;
-    }
+    // Reads only the text displayed in the summary drawer
 
-    function speakJournalEntry(docId) {
+    function speakJournalEntry() {
       // Cancel any existing speech
       speechSynthesis.cancel();
       isSpeechPaused = false;
       
-      const doc = APP_DATA.documents.find(d => d.id === docId);
-      if (!doc) return;
+      // Read only the text displayed in the drawer under "Captain McAllister's Journal:"
+      const drawerQuoteElement = document.getElementById('drawerQuote');
+      if (!drawerQuoteElement || !drawerQuoteElement.textContent) {
+        return;
+      }
       
-      const journalText = extractJournalQuote(doc.content);
+      const journalText = drawerQuoteElement.textContent.trim();
       currentSpeechUtterance = new SpeechSynthesisUtterance(journalText);
       currentSpeechUtterance.rate = 0.85;
       currentSpeechUtterance.pitch = 1.0;
@@ -970,19 +940,24 @@
     function startTour() {
       // Check if a location is currently selected on the map
       if (currentDrawerDocId) {
-        // Find the index of the current document
-        currentTourDocIndex = APP_DATA.documents.findIndex(d => d.id === currentDrawerDocId);
-        if (currentTourDocIndex === -1) currentTourDocIndex = 0;
-        tourStartDocIndex = currentTourDocIndex;
+        // Find the milestone/coordinate that matches the current drawer document
+        const milestoneIdx = APP_DATA.milestones.findIndex(m => m.doc_id === currentDrawerDocId);
+        if (milestoneIdx > -1) {
+          currentTourDocIndex = milestoneIdx;
+        } else {
+          currentTourDocIndex = 0;
+        }
       } else {
-        // Start from the beginning
-        tourStartDocIndex = 0;
+        // Start from the first milestone
         currentTourDocIndex = 0;
       }
       
       document.getElementById('tourBar').classList.remove('hidden');
+      
+      // Populate drawer with first milestone and speak it
+      openSummaryDrawer(APP_DATA.milestones[currentTourDocIndex], currentTourDocIndex);
       updateTourProgress();
-      speakJournalEntry(APP_DATA.documents[currentTourDocIndex].id);
+      speakJournalEntry();
     }
 
     function stopTour() {
@@ -996,19 +971,21 @@
 
     function navigateTour(delta) {
       currentTourDocIndex += delta;
-      if (currentTourDocIndex < 0) currentTourDocIndex = APP_DATA.documents.length - 1;
-      if (currentTourDocIndex >= APP_DATA.documents.length) currentTourDocIndex = 0;
+      if (currentTourDocIndex < 0) currentTourDocIndex = APP_DATA.milestones.length - 1;
+      if (currentTourDocIndex >= APP_DATA.milestones.length) currentTourDocIndex = 0;
       
+      // Populate drawer with current milestone
+      openSummaryDrawer(APP_DATA.milestones[currentTourDocIndex], currentTourDocIndex);
       updateTourProgress();
+      
       if (isTourPlaying) {
-        speakJournalEntry(APP_DATA.documents[currentTourDocIndex].id);
+        speakJournalEntry();
       }
     }
 
     function updateTourProgress() {
-      const docId = APP_DATA.documents[currentTourDocIndex].id;
-      const doc = APP_DATA.documents[currentTourDocIndex];
-      document.getElementById('tourProgressText').textContent = `Doc ${String(docId).padStart(3, '0')} / ${APP_DATA.documents.length}`;
+      const milestone = APP_DATA.milestones[currentTourDocIndex];
+      document.getElementById('tourProgressText').textContent = `Milestone ${currentTourDocIndex + 1} / ${APP_DATA.milestones.length}`;
     }
 
     function toggleTourPlay() {
@@ -1016,7 +993,7 @@
         // Start playing
         isTourPlaying = true;
         isSpeechPaused = false;
-        speakJournalEntry(APP_DATA.documents[currentTourDocIndex].id);
+        speakJournalEntry();
       } else {
         // Pause/Resume speech
         if (isSpeechPaused) {
