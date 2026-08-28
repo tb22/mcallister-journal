@@ -1171,10 +1171,6 @@
         tourTimer = null;
       }
       
-      // Get current coordinate for position info
-      const coord = APP_DATA.daily_coordinates[currentTourDocIndex];
-      const coordText = coord ? formatCoordsForSpeech(coord) : '';
-      
       // Read only the text displayed in the drawer under "Captain McAllister's Journal:"
       const drawerQuoteElement = document.getElementById('drawerQuote');
       if (!drawerQuoteElement || !drawerQuoteElement.textContent) {
@@ -1187,9 +1183,8 @@
         rawQuote = rawQuote.slice(1, -1).trim();
       }
       
-      // Combine coordinates and journal quote, then normalize through speech transformation array
-      let fullText = coordText + ' ' + rawQuote;
-      fullText = normalizeTextForSpeech(fullText);
+      // Normalize journal entry directly through speech transformation array
+      let fullText = normalizeTextForSpeech(rawQuote);
       
       currentSpeechUtterance = new SpeechSynthesisUtterance(fullText);
       currentSpeechUtterance.rate = 0.85;
