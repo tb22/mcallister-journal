@@ -687,13 +687,12 @@
 
         const marker = L.marker([c.lat, c.lng], { icon: customDot }).addTo(coordLayerGroup);
 
-        const latStr = `${Math.abs(c.lat).toFixed(2)}° ${c.lat >= 0 ? 'N' : 'S'}`;
-        const lngStr = `${Math.abs(c.lng).toFixed(2)}° ${c.lng >= 0 ? 'W' : 'E'}`;
+        const coords = parseCoordsFromEntry(c.note, c.lat, c.lng);
 
         marker.bindTooltip(`
           <div style="font-size:11px; line-height:1.3;">
             <strong style="color:${dotColor};">${c.date}</strong><br>
-            <span style="font-family:monospace; font-size:10px;">Lat ${latStr}, Long ${lngStr}</span><br>
+            <span style="font-family:monospace; font-size:10px;">Lat ${coords.latStr}, Long ${coords.lngStr}</span><br>
             <span style="color:#555; font-style:italic;">${c.vessel}</span>
           </div>
         `, {
@@ -811,6 +810,68 @@
     // -------------------------------------------------------------
     let currentDrawerDocId = 1;
 
+    // Coordinate Extraction & Nautical Conversion Utilities
+    function decimalToDMS(lat, lng) {
+      const latDeg = Math.floor(Math.abs(lat));
+      const latMin = Math.round((Math.abs(lat) - latDeg) * 60);
+      const latDir = lat >= 0 ? 'N' : 'S';
+
+      const lngDeg = Math.floor(Math.abs(lng));
+      const lngMin = Math.round((Math.abs(lng) - lngDeg) * 60);
+      const lngDir = lng <= 0 ? 'W' : 'E';
+
+      const latMinStr = String(latMin).padStart(2, '0');
+      const lngMinStr = String(lngMin).padStart(2, '0');
+
+      return {
+        latStr: `${latDeg}° ${latMinStr}' ${latDir}`,
+        lngStr: `${lngDeg}° ${lngMinStr}' ${lngDir}`,
+        full: `${latDeg}° ${latMinStr}' ${latDir}, ${lngDeg}° ${lngMinStr}' ${lngDir}`,
+        latDeg, latMin, latDir,
+        lngDeg, lngMin, lngDir
+      };
+    }
+
+    function parseCoordsFromEntry(text, lat, lng) {
+      let latStr = null;
+      let lngStr = null;
+      let latDeg = null, latMin = null, latDir = null;
+      let lngDeg = null, lngMin = null, lngDir = null;
+
+      if (text) {
+        // Extract exact Latitude from journal entry (e.g. Lat. 30° 24N, Lat 40° 09N, Lat. by Obs 40° 09N, Lat 30 24N)
+        const latMatch = text.match(/(?:Lat\.?|Latitude)\s*(?:by\s*Obs\.?\s*|obs'?d\.?\s*|in\s*at\s*noon\s*)?(\d{1,2})[°\s']+(\d{1,2})\s*['"]?\s*([NS])?/i);
+        if (latMatch) {
+          latDeg = parseInt(latMatch[1], 10);
+          latMin = parseInt(latMatch[2] || '0', 10);
+          latDir = (latMatch[3] ? latMatch[3].toUpperCase() : (lat >= 0 ? 'N' : 'S'));
+          latStr = `${latDeg}° ${String(latMin).padStart(2, '0')}' ${latDir}`;
+        }
+
+        // Extract exact Longitude from journal entry (e.g. Long. 67° 00W, Long. 55° 50W, Long 55'50W, Long 67 00W)
+        const lngMatch = text.match(/(?:Long\.?|Lon\.?|Longitude)\s*(\d{1,3})[°\s']+(\d{1,2})\s*['"]?\s*([EW])?/i);
+        if (lngMatch) {
+          lngDeg = parseInt(lngMatch[1], 10);
+          lngMin = parseInt(lngMatch[2] || '0', 10);
+          lngDir = (lngMatch[3] ? lngMatch[3].toUpperCase() : (lng <= 0 ? 'W' : 'E'));
+          lngStr = `${lngDeg}° ${String(lngMin).padStart(2, '0')}' ${lngDir}`;
+        }
+      }
+
+      const fallback = decimalToDMS(lat, lng);
+      return {
+        latStr: latStr || fallback.latStr,
+        lngStr: lngStr || fallback.lngStr,
+        full: `${latStr || fallback.latStr}, ${lngStr || fallback.lngStr}`,
+        latDeg: latDeg !== null ? latDeg : fallback.latDeg,
+        latMin: latMin !== null ? latMin : fallback.latMin,
+        latDir: latDir || fallback.latDir,
+        lngDeg: lngDeg !== null ? lngDeg : fallback.lngDeg,
+        lngMin: lngMin !== null ? lngMin : fallback.lngMin,
+        lngDir: lngDir || fallback.lngDir
+      };
+    }
+
     function openSummaryDrawer(m, idx) {
       currentDrawerDocId = m.doc_id;
       currentTourIndex = idx !== undefined ? idx : APP_DATA.milestones.findIndex(x => x.id === m.id);
@@ -829,13 +890,16 @@
       }
       if (coordIdx > -1) {
         currentTourDocIndex = coordIdx;
+        updateTourProgress();
       }
+
+      const coords = parseCoordsFromEntry(m.quote || m.summary || '', m.lat, m.lng);
 
       document.getElementById('drawerVesselBadge').textContent = m.vessel;
       document.getElementById('drawerDateBadge').textContent = m.date;
       document.getElementById('drawerTitle').textContent = m.title;
       document.getElementById('drawerRegion').textContent = m.region;
-      document.getElementById('drawerCoords').textContent = `${Math.abs(m.lat).toFixed(2)}° ${m.lat >= 0 ? 'N' : 'S'}, ${Math.abs(m.lng).toFixed(2)}° ${m.lng >= 0 ? 'W' : 'E'}`;
+      document.getElementById('drawerCoords').textContent = coords.full;
       document.getElementById('drawerSummary').textContent = m.summary;
       document.getElementById('drawerQuote').textContent = m.quote;
       document.getElementById('drawerStepCount').textContent = `Milestone ${currentTourIndex + 1} of ${APP_DATA.milestones.length}`;
@@ -861,13 +925,16 @@
       const coordIndex = APP_DATA.daily_coordinates.findIndex(coord => coord.id === c.id);
       if (coordIndex > -1) {
         currentTourDocIndex = coordIndex;
+        updateTourProgress();
       }
+
+      const coords = parseCoordsFromEntry(c.note, c.lat, c.lng);
 
       document.getElementById('drawerVesselBadge').textContent = c.vessel;
       document.getElementById('drawerDateBadge').textContent = c.date;
       document.getElementById('drawerTitle').textContent = `Daily Log Observation — ${c.date}`;
       document.getElementById('drawerRegion').textContent = `At Sea on the ${c.vessel}`;
-      document.getElementById('drawerCoords').textContent = `${Math.abs(c.lat).toFixed(2)}° ${c.lat >= 0 ? 'N' : 'S'}, ${Math.abs(c.lng).toFixed(2)}° ${c.lng >= 0 ? 'W' : 'E'}`;
+      document.getElementById('drawerCoords').textContent = coords.full;
       document.getElementById('drawerSummary').textContent = `Noon observation and daily log recorded by Captain George C. McAllister in Document McAllister${String(c.doc_id).padStart(3, '0')}.`;
       document.getElementById('drawerQuote').textContent = `"${c.note}"`;
       document.getElementById('drawerStepCount').textContent = `Log Point ID: ${c.id}`;
@@ -1063,62 +1130,36 @@
       return res;
     }
 
-    function numberToWords(num) {
-      // Convert decimal number to words for text-to-speech
-      const ones = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
-      const teens = ['ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+    function integerToWords(num) {
+      const ones = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
       const tens = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
       
-      const str = num.toFixed(2);
-      const [intPart, decPart] = str.split('.');
-      const intNum = parseInt(intPart);
-      
-      let result = '';
-      
-      // Convert integer part
-      if (intNum === 0) {
-        result = 'zero';
-      } else if (intNum < 10) {
-        result = ones[intNum];
-      } else if (intNum < 20) {
-        result = teens[intNum - 10];
-      } else if (intNum < 100) {
-        const t = Math.floor(intNum / 10);
-        const o = intNum % 10;
-        result = tens[t] + (o > 0 ? ' ' + ones[o] : '');
-      } else {
-        const h = Math.floor(intNum / 100);
-        const remainder = intNum % 100;
-        result = ones[h] + ' hundred';
-        if (remainder > 0) {
-          if (remainder < 10) {
-            result += ' ' + ones[remainder];
-          } else if (remainder < 20) {
-            result += ' ' + teens[remainder - 10];
-          } else {
-            const t = Math.floor(remainder / 10);
-            const o = remainder % 10;
-            result += ' ' + tens[t] + (o > 0 ? ' ' + ones[o] : '');
-          }
-        }
+      const n = Math.abs(Math.round(num));
+      if (n < 20) return ones[n];
+      if (n < 100) {
+        const t = Math.floor(n / 10);
+        const o = n % 10;
+        return tens[t] + (o > 0 ? '-' + ones[o] : '');
       }
-      
-      // Add decimal part
-      result += ' point ';
-      const dec1 = parseInt(decPart[0]);
-      const dec2 = parseInt(decPart[1]);
-      result += ones[dec1] + ' ' + ones[dec2];
-      
-      return result;
+      if (n < 1000) {
+        const h = Math.floor(n / 100);
+        const rem = n % 100;
+        return ones[h] + ' hundred' + (rem > 0 ? ' ' + integerToWords(rem) : '');
+      }
+      return String(n);
     }
 
-    function formatCoordsForSpeech(lat, lng) {
-      // Convert coordinates to readable text for text-to-speech
-      const latDir = lat >= 0 ? 'North' : 'South';
-      const lngDir = lng >= 0 ? 'East' : 'West';
-      const latNum = numberToWords(Math.abs(lat));
-      const lngNum = numberToWords(Math.abs(lng));
-      return `At position ${latNum} degrees ${latDir}, ${lngNum} degrees ${lngDir}.`;
+    function formatCoordsForSpeech(coord) {
+      if (!coord) return '';
+      const text = coord.note || coord.quote || coord.summary || '';
+      const p = parseCoordsFromEntry(text, coord.lat, coord.lng);
+      const latDirWord = p.latDir === 'N' ? 'North' : 'South';
+      const lngDirWord = p.lngDir === 'W' ? 'West' : 'East';
+      const latDegWords = integerToWords(p.latDeg);
+      const latMinWords = integerToWords(p.latMin);
+      const lngDegWords = integerToWords(p.lngDeg);
+      const lngMinWords = integerToWords(p.lngMin);
+      return `At position Latitude ${latDegWords} degrees ${latMinWords} ${latDirWord}, Longitude ${lngDegWords} degrees ${lngMinWords} ${lngDirWord}.`;
     }
 
     function speakJournalEntry() {
@@ -1132,7 +1173,7 @@
       
       // Get current coordinate for position info
       const coord = APP_DATA.daily_coordinates[currentTourDocIndex];
-      const coordText = coord ? formatCoordsForSpeech(coord.lat, coord.lng) : '';
+      const coordText = coord ? formatCoordsForSpeech(coord) : '';
       
       // Read only the text displayed in the drawer under "Captain McAllister's Journal:"
       const drawerQuoteElement = document.getElementById('drawerQuote');
